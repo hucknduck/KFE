@@ -7,7 +7,7 @@ import numpy as np
 import time
 import argparse
 import os
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 from tfe_models import TFE_GNN, TFE_GNN_large
 from tfe_utils import propagate_adj, set_seed, accuracy, load_data, random_walk_adj, consis_loss
@@ -99,7 +99,8 @@ def run(args, dataset, optimi, full, random_split, i):
         adjs = [adj_lp]
         cur = adj_lp
         for b in range(1, num_bands - 1):     # all LP-like bands
-            cur = torch.mm(adj_lp,torch.matrix_power(adj_lp, 3))  # LP^k1 * HP^k2
+            print(f"DEBUG: band {b}")
+            cur = torch.mm(adj_hp,torch.matrix_power(adj_lp, 3))  # LP^k1 * HP^k2
             adjs.append(cur)
         adjs.append(adj_hp)                # last band is HP
     else:
@@ -109,7 +110,7 @@ def run(args, dataset, optimi, full, random_split, i):
     train_losses = []
     val_losses = []
     run_time = []
-    for epoch in range(args.epochs):
+    for epoch in trange(args.epochs, desc=f'Run {i+1}'):
         t0 = time.time()
         train(model, optimizer, adjs, None, features, labels, mask)
         run_time.append(time.time()-t0)
@@ -188,7 +189,7 @@ all_test_accs = []
 adas = []
 adas_lp = []
 
-for i in tqdm(range(args.runs)):
+for i in range(args.runs):
     test_acc, best_val_loss, ada, ada_lp, run_time = run(args, args.dataset, args.optimizer, args.full, args.random_split, i)
     time_results.append(run_time)
     results.append([ada, ada_lp])
