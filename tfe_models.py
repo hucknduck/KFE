@@ -143,6 +143,7 @@ class TFE_GNN(nn.Module):
         for i in range(self.nl):
             stdv = 1. / math.sqrt(self.layers[i].weight.size(1))
             self.layers[i].weight.data.normal_(-stdv, stdv)
+            
 
     def mix_prop(self, adj, x, coe):
         # Polynomial propagation: sum_k coe[k] * (A^k x)
@@ -159,9 +160,8 @@ class TFE_GNN(nn.Module):
             adjs = list(adj_hp)
             adaptives = list(self.adaptives)
             # If there are more adaptives than adjs (or vice versa), match the shorter
-            bands = min(len(adaptives), len(adjs))
-            adaptives = adaptives[:bands]
-            adjs = adjs[:bands]
+            assert len(adjs) == len(adaptives), \
+            f"bands mismatch: got {len(adjs)} adjs, {len(adaptives)} adaptive vectors"
         else:
             # Back-compat: two-band path
             adjs = [adj_lp, adj_hp]
