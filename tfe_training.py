@@ -56,18 +56,22 @@ def run(args, dataset, optimi, full, random_split, i):
                                args.activation, args.hop, args.combine)
     if optimi == 'Adam':
         optimizer = optim.Adam(
-            [{'params': model.adaptive, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
-             {'params': model.adaptive_lp, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
-             {'params': model.layers.parameters(), 'weight_decay': args.wd_lin, 'lr': args.lr_lin},
-             {'params': model.ense_coe, 'weight_decay': args.wd_adaptive2, 'lr': args.lr_adaptive2},
-             ])
+            [
+                {'params': model.adaptives, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
+                # {'params': model.adaptive_lp, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
+                {'params': model.layers.parameters(), 'weight_decay': args.wd_lin, 'lr': args.lr_lin},
+                {'params': model.ense_coe, 'weight_decay': args.wd_adaptive2, 'lr': args.lr_adaptive2},
+            ]
+        )
     if optimi == "RMSprop":
         optimizer = optim.RMSprop(
-            [{'params': model.adaptive, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
-             {'params': model.adaptive_lp, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
-             {'params': model.layers.parameters(), 'weight_decay': args.wd_lin, 'lr': args.lr_lin},
-             {'params': model.ense_coe, 'weight_decay': args.wd_adaptive2, 'lr': args.lr_adaptive2},
-             ])
+            [
+                {'params': model.adaptive, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
+                {'params': model.adaptive_lp, 'weight_decay': args.wd_adaptive, 'lr': args.lr_adaptive},
+                {'params': model.layers.parameters(), 'weight_decay': args.wd_lin, 'lr': args.lr_lin},
+                {'params': model.ense_coe, 'weight_decay': args.wd_adaptive2, 'lr': args.lr_adaptive2},
+            ]
+        )
 
 
     model.to(device)
@@ -89,8 +93,17 @@ def run(args, dataset, optimi, full, random_split, i):
 
     # Build adjacency list for multi-band TFE
     # Default: use LP for all mid bands and HP for the last band
-    adjs = [adj_lp] * (len(args.hop) - 1) + [adj_hp]
-
+    adjs = []
+    if hasattr(model, 'adaptives') and len(model.adaptives) > 2:
+        num_bands = len(model.adaptives)
+        adjs = [adj_lp]
+        cur = adj_lp
+        for b in range(1, num_bands - 1):     # all LP-like bands
+            cur = torch.mm(adj_lp,torch.matrix_power(adj_lp, 3))  # LP^k1 * HP^k2
+            adjs.append(cur)
+        adjs.append(adj_hp)                # last band is HP
+    else:
+        adjs = [adj_lp, adj_hp]
 
     best_acc, best_val_acc, test_acc, best_val_loss = 0, 0, 0, float("inf")
     train_losses = []
