@@ -10,7 +10,7 @@ import os
 from tqdm import tqdm, trange
 
 from tfe_models import TFE_GNN, TFE_GNN_large
-from tfe_utils import propagate_adj, set_seed, accuracy, load_data, random_walk_adj, consis_loss
+from tfe_utils import propagate_adj, set_seed, accuracy, load_data, random_walk_adj, consis_loss, matrix_power_sparse
 
 
 def train(model, optimizer, adj_hp, adj_lp, x, y, mask):
@@ -91,16 +91,49 @@ def run(args, dataset, optimi, full, random_split, i):
     else:
         print("Unsupported Graph Filter Forms")
 
+
+    #DEBUG PRINTS
+    print(f"adj_hp dtyp is {adj_hp.dtype}")        # must be float32/float64/complex
+    print(f"adj_hp is sparse {adj_hp.is_sparse}")    # matrix_power does not support sparse tensors
+    print(f"adj_hp is contiguous {adj_hp.is_contiguous()}")
+
+    print(f"adj_lp dtyp is {adj_lp.dtype}")        # must be float32/float64/complex
+    print(f"adj_lp is sparse {adj_lp.is_sparse}")    # matrix_power does not support sparse tensors
+    print(f"adj_lp is contiguous {adj_lp.is_contiguous()}")
+
     # Build adjacency list for multi-band TFE
     # Default: use LP for all mid bands and HP for the last band
     adjs = []
     if hasattr(model, 'adaptives') and len(model.adaptives) > 2:
         num_bands = len(model.adaptives)
         adjs = [adj_lp]
-        cur = adj_lp
-        for b in range(1, num_bands - 1):     # all LP-like bands
-            print(f"DEBUG: band {b}")
-            cur = torch.mm(adj_hp,torch.matrix_power(adj_lp, 3))  # LP^k1 * HP^k2
+        
+        if args.bandwidths:
+            bandwidths = [int(x) for x in args.bandwidths.split(',')]
+        else:
+            bandwidths = [1] * (num_bands - 2) * 2
+        assert len(bandwidths) == (num_bands - 2) * 2, \
+            f"incorrect number of bandwidths/bands: bandwidth params {len(bandwidths)}, num bands {num_bands}"
+
+        for b in range(num_bands - 2):     # all LP-like bands
+            lower = bandwidths[b*2]
+            upper = bandwidths[b*2+1]
+            
+            hp_part = matrix_power_sparse(adj_hp, lower)
+            lp_part = matrix_power_sparse(adj_lp, upper)
+            
+            print(f"hp_part dtyp is {hp_part.dtype}")        # must be float32/float64/complex
+            print(f"hp_part is sparse {hp_part.is_sparse}")    # matrix_power does not support sparse tensors
+            print(f"hp_part is contiguous {hp_part.is_contiguous()}")
+
+            print(f"lp_part dtyp is {lp_part.dtype}")        # must be float32/float64/complex
+            print(f"lp_part is sparse {lp_part.is_sparse}")    # matrix_power does not support sparse tensors
+            print(f"lp_part is contiguous {lp_part.is_contiguous()}")
+
+
+            print(f"DEBUG: midband {b + 1}, lower {lower}, upper {upper}")
+            cur = torch.mm(hp_part, lp_part)  # LP^k1 * HP^k2
+            cur = cur.to_sparse()
             adjs.append(cur)
         adjs.append(adj_hp)                # last band is HP
     else:
@@ -169,6 +202,8 @@ parser.add_argument('--activation', type=bool, default=True)
 parser.add_argument('--full', type=bool, default=True, help='Whether full-supervised')
 parser.add_argument('--random_split', type=bool, default=True, help='Whether random split')
 parser.add_argument('--combine', type=str, default='sum', help='sum, con, lp, hp')
+
+parser.add_argument('--bandwidths', type=str, default=None, help='Comma-separated per-band bandwidths given as tuples, exp for HP and exp for LP, e.g., "1,3,2,4".')
 
 args = parser.parse_args()
 print(args)

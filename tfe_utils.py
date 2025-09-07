@@ -13,6 +13,11 @@ import pickle as pkl
 import networkx as nx
 import random
 
+def matrix_power_sparse(mat, k):
+    result = torch.eye(mat.size(0), device=mat.device, dtype=mat.dtype)
+    for _ in range(k):
+        result = result @ mat
+    return result
 
 def set_seed(seed):
     random.seed(seed)
