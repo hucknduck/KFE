@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import dgl
 import torch
 from torch import optim
@@ -12,6 +14,9 @@ from tqdm import tqdm, trange
 from tfe_models import TFE_GNN, TFE_GNN_large
 from tfe_utils import propagate_adj, set_seed, accuracy, load_data, random_walk_adj, consis_loss, matrix_power_sparse
 
+# hardcoded output settings
+_RESULT_DIR = Path("results/records")
+_RESULT_FORMAT = "jsonl"   # change to "csv" if you prefer CSV aggregation
 
 def train(model, optimizer, adj_hp, adj_lp, x, y, mask):
     model.train()
@@ -205,6 +210,8 @@ parser.add_argument('--combine', type=str, default='sum', help='sum, con, lp, hp
 
 parser.add_argument('--bandwidths', type=str, default=None, help='Comma-separated per-band bandwidths given as tuples, exp for HP and exp for LP, e.g., "1,3,2,4".')
 
+
+
 args = parser.parse_args()
 print(args)
 
@@ -239,3 +246,67 @@ for i in time_results:
 print("each run avg_time:",run_sum/(args.runs),"s")
 print("each epoch avg_time:",1000*run_sum/epochsss,"ms")
 print('test acc mean (%) =', np.mean(all_test_accs)*100, np.std(all_test_accs)*100)
+
+
+# --- append one-line result record (hardcoded) ---
+
+# ensure directory exists
+_RESULT_DIR.mkdir(parents=True, exist_ok=True)
+
+# collect canonical strings (avoid breaking if attr missing)
+_dataset   = getattr(args, "dataset", "unknown")
+_bands     = int(getattr(args, "bands", 0))
+_seed      = int(getattr(args, "seed", 0))
+_runs      = int(getattr(args, "runs", 1))
+_bandwidths = getattr(args, "bandwidths", "")  # recorded verbatim if present
+# hops could be in args.hops (csv string) or args.hop (list); normalize:
+if hasattr(args, "hops") and isinstance(args.hops, str) and args.hops:
+    _hops_str = args.hops
+elif hasattr(args, "hop") and isinstance(args.hop, (list, tuple)):
+    _hops_str = ",".join(str(x) for x in args.hop)
+else:
+    _hops_str = ""
+
+# final accuracies: expect all_test_accs to be fractions in [0,1]
+# if yours are percents, divide by 100.0 here.
+_acc_mean = float(np.mean(all_test_accs))
+_acc_std  = float(np.std(all_test_accs))
+
+# add slurm job id if running under slurm
+_job_id = os.environ.get("SLURM_JOB_ID")
+
+_record = {
+    "dataset":    _dataset,
+    "bands":      _bands,
+    "bandwidths": _bandwidths,   # e.g. "1,3,5,10" or "1,3,1,3" etc.
+    "hops":       _hops_str,     # e.g. "5,5,5"
+    "seed":       _seed,
+    "runs":       _runs,
+    "acc_mean":   _acc_mean,     # fraction (e.g., 0.7423)
+    "acc_std":    _acc_std,      # fraction
+    "job_id":     _job_id,
+}
+
+_out_path = _RESULT_DIR / f"{_dataset}__bands{_bands}.{_RESULT_FORMAT}"
+
+if _RESULT_FORMAT == "jsonl":
+    with _out_path.open("a", encoding="utf-8") as _f:
+        _f.write(json.dumps(_record, ensure_ascii=False) + "\n")
+else:  # CSV fallback
+    _header = ["dataset","bands","bandwidths","hops","seed","runs","acc_mean","acc_std","job_id"]
+    _exists = _out_path.exists()
+    with _out_path.open("a", encoding="utf-8") as _f:
+        if not _exists:
+            _f.write(",".join(_header) + "\n")
+        _f.write(",".join([
+            str(_record["dataset"]),
+            str(_record["bands"]),
+            str(_record["bandwidths"]),
+            str(_record["hops"]),
+            str(_record["seed"]),
+            str(_record["runs"]),
+            f"{_record['acc_mean']:.6f}",
+            f"{_record['acc_std']:.6f}",
+            str(_record["job_id"] or ""),
+        ]) + "\n")
+# --- end: result record ---
