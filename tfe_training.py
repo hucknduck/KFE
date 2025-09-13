@@ -220,7 +220,7 @@ parser.add_argument('--random_split', type=bool, default=True, help='Whether ran
 parser.add_argument('--combine', type=str, default='sum', help='sum, con, lp, hp')
 
 parser.add_argument('--bandwidths', type=str, default=None, help='Comma-separated per-band bandwidths given as tuples, exp for HP and exp for LP, e.g., "1,3,2,4".')
-
+parser.add_argument('--lamda', type=float, default=0.001, help='Coefficient for the regularization term.')
 
 
 args = parser.parse_args()
