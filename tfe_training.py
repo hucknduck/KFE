@@ -35,7 +35,8 @@ def train(model, optimizer, adj_hp, adj_lp, x, y, mask, lamda=0.001):
 
 def test(model, adj_hp, adj_lp, x, y, mask):
     model.eval()
-    logits, _, accs, losses = model(adj_hp, adj_lp, x), [], []
+    out, accs, losses = model(adj_hp, adj_lp, x), [], []
+    logits, _ = out
     logits = F.log_softmax(logits, dim=1)
     for i in range(3):
         acc = accuracy(logits[mask[i]], y[mask[i]])

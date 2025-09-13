@@ -200,7 +200,15 @@ class TFE_GNN(nn.Module):
                     h = F.relu(h)
                 h = F.dropout(h, self.drop[1], self.training)
 
-        return h
+        pen = 0.0
+        if self.training:
+            for i in range(len(h_bands)):
+                for j in range(i+1, len(h_bands)):
+                    ci = F.normalize(h_bands[i], dim=1)
+                    cj = F.normalize(h_bands[j], dim=1)
+                    pen = pen + (ci * cj).sum(dim=1).mean()
+
+        return h, pen
 
 class TFE_GNN_large(nn.Module):
     def __init__(self, input_dim, hidden_dim, out_dim, num_layers, dropout, activation, hop, combine):
