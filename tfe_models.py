@@ -282,4 +282,12 @@ class TFE_GNN_large(nn.Module):
         else:
             h = sum(h_bands)
 
-        return h
+        pen = 0.0
+        if self.training:
+            for i in range(len(h_bands)):
+                for j in range(i+1, len(h_bands)):
+                    ci = F.normalize(h_bands[i], dim=1)
+                    cj = F.normalize(h_bands[j], dim=1)
+                    pen = pen + (ci * cj).sum(dim=1).mean()
+
+        return h, pen
