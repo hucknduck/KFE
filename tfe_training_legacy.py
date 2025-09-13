@@ -1,5 +1,3 @@
-import json
-from pathlib import Path
 import dgl
 import torch
 from torch import optim
@@ -14,9 +12,6 @@ from tqdm import tqdm, trange
 from tfe_models import TFE_GNN, TFE_GNN_large
 from tfe_utils import propagate_adj, set_seed, accuracy, load_data, random_walk_adj, consis_loss, matrix_power_sparse
 
-# hardcoded output settings
-_RESULT_DIR = Path("results/records")
-_RESULT_FORMAT = "jsonl"   # change to "csv" if you prefer CSV aggregation
 
 def train(model, optimizer, adj_hp, adj_lp, x, y, mask):
     model.train()
@@ -86,8 +81,7 @@ def run(args, dataset, optimi, full, random_split, i):
     val_mask = val_mask.clone().detach().to(device)
     test_mask = test_mask.clone().detach().to(device)
     mask = [train_mask, val_mask, test_mask]
-    print(f"-------------DEBUG------------------")
-    print(f"Starting Filter Creation")
+
     if args.gf == 'sym':
         adj_lp = propagate_adj(adj, 'low', -0.5, -0.5).to(device)
         adj_hp = propagate_adj(adj, 'high', args.eta, args.eta).to(device)
@@ -99,19 +93,17 @@ def run(args, dataset, optimi, full, random_split, i):
 
 
     #DEBUG PRINTS
-    #print(f"adj_hp dtyp is {adj_hp.dtype}")        # must be float32/float64/complex
-    #print(f"adj_hp is sparse {adj_hp.is_sparse}")    # matrix_power does not support sparse tensors
-    #print(f"adj_hp is contiguous {adj_hp.is_contiguous()}")
+    print(f"adj_hp dtyp is {adj_hp.dtype}")        # must be float32/float64/complex
+    print(f"adj_hp is sparse {adj_hp.is_sparse}")    # matrix_power does not support sparse tensors
+    print(f"adj_hp is contiguous {adj_hp.is_contiguous()}")
 
-    #print(f"adj_lp dtyp is {adj_lp.dtype}")        # must be float32/float64/complex
-    #print(f"adj_lp is sparse {adj_lp.is_sparse}")    # matrix_power does not support sparse tensors
-    #print(f"adj_lp is contiguous {adj_lp.is_contiguous()}")
+    print(f"adj_lp dtyp is {adj_lp.dtype}")        # must be float32/float64/complex
+    print(f"adj_lp is sparse {adj_lp.is_sparse}")    # matrix_power does not support sparse tensors
+    print(f"adj_lp is contiguous {adj_lp.is_contiguous()}")
 
     # Build adjacency list for multi-band TFE
     # Default: use LP for all mid bands and HP for the last band
     adjs = []
-    print(f"-------------DEBUG------------------")
-    print(f"Starting MidBand Filter Creation")
     if hasattr(model, 'adaptives') and len(model.adaptives) > 2:
         num_bands = len(model.adaptives)
         adjs = [adj_lp]
@@ -130,25 +122,23 @@ def run(args, dataset, optimi, full, random_split, i):
             hp_part = matrix_power_sparse(adj_hp, lower)
             lp_part = matrix_power_sparse(adj_lp, upper)
             
-            #print(f"hp_part dtyp is {hp_part.dtype}")        # must be float32/float64/complex
-            #print(f"hp_part is sparse {hp_part.is_sparse}")    # matrix_power does not support sparse tensors
-            #print(f"hp_part is contiguous {hp_part.is_contiguous()}")
+            print(f"hp_part dtyp is {hp_part.dtype}")        # must be float32/float64/complex
+            print(f"hp_part is sparse {hp_part.is_sparse}")    # matrix_power does not support sparse tensors
+            print(f"hp_part is contiguous {hp_part.is_contiguous()}")
 
-            #print(f"lp_part dtyp is {lp_part.dtype}")        # must be float32/float64/complex
-            #print(f"lp_part is sparse {lp_part.is_sparse}")    # matrix_power does not support sparse tensors
-            #print(f"lp_part is contiguous {lp_part.is_contiguous()}")
+            print(f"lp_part dtyp is {lp_part.dtype}")        # must be float32/float64/complex
+            print(f"lp_part is sparse {lp_part.is_sparse}")    # matrix_power does not support sparse tensors
+            print(f"lp_part is contiguous {lp_part.is_contiguous()}")
 
 
-            #print(f"DEBUG: midband {b + 1}, lower {lower}, upper {upper}")
+            print(f"DEBUG: midband {b + 1}, lower {lower}, upper {upper}")
             cur = torch.mm(hp_part, lp_part)  # LP^k1 * HP^k2
             cur = cur.to_sparse()
             adjs.append(cur)
         adjs.append(adj_hp)                # last band is HP
     else:
         adjs = [adj_lp, adj_hp]
-    
-    print(f"-------------DEBUG------------------")
-    print(f"Starting Train")
+
     best_acc, best_val_acc, test_acc, best_val_loss = 0, 0, 0, float("inf")
     train_losses = []
     val_losses = []
@@ -176,11 +166,6 @@ def run(args, dataset, optimi, full, random_split, i):
     #torch.save(val_losses, f"/home/user/duan/four_mix_ChebNet_1/eigenvalue/{args.dataset}_tfe_val_loss_mlrrm{i}.pkl")
 
     return test_acc, best_val_loss, ada, ada_lp, run_time
-
-
-
-cuda_env = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-print(f"cuda_env is {cuda_env}")
 
 
 parser = argparse.ArgumentParser()
@@ -220,8 +205,6 @@ parser.add_argument('--combine', type=str, default='sum', help='sum, con, lp, hp
 
 parser.add_argument('--bandwidths', type=str, default=None, help='Comma-separated per-band bandwidths given as tuples, exp for HP and exp for LP, e.g., "1,3,2,4".')
 
-
-
 args = parser.parse_args()
 print(args)
 
@@ -256,67 +239,3 @@ for i in time_results:
 print("each run avg_time:",run_sum/(args.runs),"s")
 print("each epoch avg_time:",1000*run_sum/epochsss,"ms")
 print('test acc mean (%) =', np.mean(all_test_accs)*100, np.std(all_test_accs)*100)
-
-
-# --- append one-line result record (hardcoded) ---
-
-# ensure directory exists
-_RESULT_DIR.mkdir(parents=True, exist_ok=True)
-
-# collect canonical strings (avoid breaking if attr missing)
-_dataset   = getattr(args, "dataset", "unknown")
-_bands     = int(getattr(args, "bands", 0))
-_seed      = int(getattr(args, "seed", 0))
-_runs      = int(getattr(args, "runs", 1))
-_bandwidths = getattr(args, "bandwidths", "")  # recorded verbatim if present
-# hops could be in args.hops (csv string) or args.hop (list); normalize:
-if hasattr(args, "hops") and isinstance(args.hops, str) and args.hops:
-    _hops_str = args.hops
-elif hasattr(args, "hop") and isinstance(args.hop, (list, tuple)):
-    _hops_str = ",".join(str(x) for x in args.hop)
-else:
-    _hops_str = ""
-
-# final accuracies: expect all_test_accs to be fractions in [0,1]
-# if yours are percents, divide by 100.0 here.
-_acc_mean = float(np.mean(all_test_accs))
-_acc_std  = float(np.std(all_test_accs))
-
-# add slurm job id if running under slurm
-_job_id = os.environ.get("SLURM_JOB_ID")
-
-_record = {
-    "dataset":    _dataset,
-    "bands":      _bands,
-    "bandwidths": _bandwidths,   # e.g. "1,3,5,10" or "1,3,1,3" etc.
-    "hops":       _hops_str,     # e.g. "5,5,5"
-    "seed":       _seed,
-    "runs":       _runs,
-    "acc_mean":   _acc_mean,     # fraction (e.g., 0.7423)
-    "acc_std":    _acc_std,      # fraction
-    "job_id":     _job_id,
-}
-
-_out_path = _RESULT_DIR / f"{_dataset}__bands{_bands}.{_RESULT_FORMAT}"
-
-if _RESULT_FORMAT == "jsonl":
-    with _out_path.open("a", encoding="utf-8") as _f:
-        _f.write(json.dumps(_record, ensure_ascii=False) + "\n")
-else:  # CSV fallback
-    _header = ["dataset","bands","bandwidths","hops","seed","runs","acc_mean","acc_std","job_id"]
-    _exists = _out_path.exists()
-    with _out_path.open("a", encoding="utf-8") as _f:
-        if not _exists:
-            _f.write(",".join(_header) + "\n")
-        _f.write(",".join([
-            str(_record["dataset"]),
-            str(_record["bands"]),
-            str(_record["bandwidths"]),
-            str(_record["hops"]),
-            str(_record["seed"]),
-            str(_record["runs"]),
-            f"{_record['acc_mean']:.6f}",
-            f"{_record['acc_std']:.6f}",
-            str(_record["job_id"] or ""),
-        ]) + "\n")
-# --- end: result record ---

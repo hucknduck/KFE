@@ -10,20 +10,20 @@ import sys
 import time
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
-
+import random
 # === HARD LIMITS (per your spec) ===
-MAX_CONCURRENT_SBATCH = 10   # do not change unless you change the spec
+MAX_CONCURRENT_SBATCH = 20   # do not change unless you change the spec
 MAX_CMDS_PER_JOB      = 20   # ≤20 execs per worker job
 
 # === Defaults you asked for (can be overridden via CLI flags if you want) ===
-DEFAULT_BANDS_SET      = [2, 3, 4, 5]
+DEFAULT_BANDS_SET      = [3, 4, 5]
 DEFAULT_BANDWIDTH_SET  = [1, 3, 5, 10]
 DEFAULT_DATASET        = "squirrel"
 DEFAULT_EPOCHS         = 1000
 DEFAULT_PATIENCE       = 200
 DEFAULT_HIDDEN         = 512
 DEFAULT_LAYERS         = 2
-DEFAULT_DEVICE         = 0
+DEFAULT_DEVICE         = 0#"$CUDA_VISIBLE_DEVICES"
 DEFAULT_RUNS           = 1
 DEFAULT_OPTIM          = "Adam"
 DEFAULT_HOP_LP         = 2
@@ -85,9 +85,10 @@ def make_leaf_cmd(
     """
     bool_str = lambda b: "True" if b else "False"
     line = (
-        f"sbatch {SLURM_ARRAY} "
+        f"{SLURM_ARRAY} "
         f"--dataset {dataset} --epochs {epochs} --patience {patience} "
-        f"--hidden {hidden} --layers {layers} --device {device} --runs {runs} "
+        #f"--hidden {hidden} --layers {layers} --runs {runs} " #Removed --device
+        f"--hidden {hidden} --layers {layers} --device {device} --runs {runs} "#original 
         f"--optimizer {optimizer} --hop_lp {hop_lp} --hop_hp {hop_hp} "
         f"--pro_dropout {pro_dropout} --lin_dropout {lin_dropout} "
         f"--eta {eta} --bands {bands} --lr_adaptive 0.1 --wd_adaptive 0.05 "
@@ -110,17 +111,23 @@ def run_cmd(cmd: List[str]) -> subprocess.CompletedProcess:
 
 def submit_worker(batch_file: Path) -> int:
     """sbatch slurm/worker.sbatch batches/batch_XXXX.cmds -> returns jobid"""
-    cp = run_cmd(["sbatch", SLURM_WORKER, str(batch_file)])
+    cuda_env = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    available_gpus = [int(x) for x in cuda_env.split(",") if x.strip() != ""]
+    if not available_gpus:
+        available_gpus = [0,1,2,3,4,5,6,7,8]  # fallback if the list is empty
+    Gpu = random.choice(available_gpus)
+    
+    cp = run_cmd(["sbatch", SLURM_WORKER, str(batch_file), f"--device {Gpu}"])
     # stdout typically: "Submitted batch job 123456"
     m = re.search(r"Submitted batch job\s+(\d+)", cp.stdout.strip())
     if not m:
         raise RuntimeError(f"Could not parse sbatch output:\n{cp.stdout}\n{cp.stderr}")
-    return int(m.group(1))
+    return int(m.group(1)), Gpu
 
 def active_worker_count(user: str) -> int:
     # Match by job-name set inside worker.sbatch ("eval_worker")
     try:
-        cp = run_cmd(["squeue", "-h", "-u", user, "-n", "eval_worker", "-o", "%i"])
+        cp = run_cmd(["squeue", "-h", "-u", user, "-n", "kfe_eval_worker", "-o", "%i"])
         # one job id per line
         ids = [ln for ln in cp.stdout.splitlines() if ln.strip()]
         return len(ids)
@@ -161,8 +168,8 @@ def aggregate_results(records_dir: Path, out_dir: Path):
                 rows.append({
                     "dataset":    rec.get("dataset"),
                     "bands":      int(rec.get("bands")),
-                    "bandwidths": rec.get("bandwidths"),  # e.g. "l1,h1,l2,h2"
-                    "hops":       rec.get("hops"),
+                    "bandwidths": rec.get("bandwidths").replace(",", " "),  # e.g. "l1,h1,l2,h2"
+                    "hops":       rec.get("hops").replace(",", " "),
                     "seed":       rec.get("seed"),
                     "runs":       rec.get("runs"),
                     "acc_mean":   float(rec.get("acc_mean")),
@@ -217,7 +224,7 @@ def main():
     ap.add_argument("--patience", type=int, default=DEFAULT_PATIENCE)
     ap.add_argument("--hidden", type=int, default=DEFAULT_HIDDEN)
     ap.add_argument("--layers", type=int, default=DEFAULT_LAYERS)
-    ap.add_argument("--device", type=int, default=DEFAULT_DEVICE)
+    ap.add_argument("--device", type=str, default=DEFAULT_DEVICE)
     ap.add_argument("--runs", type=int, default=DEFAULT_RUNS)
     ap.add_argument("--optimizer", type=str, default=DEFAULT_OPTIM)
     ap.add_argument("--hop-lp", type=int, default=DEFAULT_HOP_LP)
@@ -286,18 +293,18 @@ def main():
     # Initial fill
     while pending and len(launched) < MAX_CONCURRENT_SBATCH:
         bf = pending.pop(0)
-        jid = submit_worker(bf)
+        jid, Gpu = submit_worker(bf)
         launched.append((jid, bf))
-        print(f"[submit] {bf.name} -> job {jid}")
+        print(f"[submit] {bf.name} -> job {jid}, Gpu {Gpu}")
 
     # Refill loop
     while pending:
         wait_for_some_capacity(user, target_free_slots=1, poll_sec=20)
         # There is capacity for at least one more
         bf = pending.pop(0)
-        jid = submit_worker(bf)
+        jid, Gpu = submit_worker(bf)
         launched.append((jid, bf))
-        print(f"[submit] {bf.name} -> job {jid}")
+        print(f"[submit] {bf.name} -> job {jid}, Gpu {Gpu}")
 
     # Wait until all workers finish
     while active_worker_count(user) > 0:
