@@ -23,7 +23,9 @@ def train(model, optimizer, adj_hp, adj_lp, x, y, mask, lamda=0.001):
     optimizer.zero_grad()
     out, pen = model(adj_hp, adj_lp, x)
     out = F.log_softmax(out, dim=1)
-    loss = F.nll_loss(out[mask[0]], y[mask[0]]) + pen * lamda
+    ce_loss = F.nll_loss(out[mask[0]], y[mask[0]])
+    loss = ce_loss + pen * lamda
+    print(f"CE: {ce_loss.item():.4f}, Pen: {pen.item():.4f}, Scaled Pen: {(lamda*pen).item():.4f}\n\n")
     if args.dataset in {'citeseer'} and not args.full:
         cos_loss = consis_loss(out, 0.5, 0.9)
         (loss+cos_loss).backward()
