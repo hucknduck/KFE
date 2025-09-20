@@ -21,11 +21,11 @@ _RESULT_FORMAT = "jsonl"   # change to "csv" if you prefer CSV aggregation
 def train(model, optimizer, adj_hp, adj_lp, x, y, mask, lamda=0.001):
     model.train()
     optimizer.zero_grad()
-    out, pen = model(adj_hp, adj_lp, x)
+    out, pen = model(adj_hp, adj_lp, x, add_reg=(lamda != 0))
     out = F.log_softmax(out, dim=1)
     ce_loss = F.nll_loss(out[mask[0]], y[mask[0]])
     loss = ce_loss + pen * lamda
-    print(f"CE: {ce_loss.item():.4f}, Pen: {pen.item():.4f}, Scaled Pen: {(lamda*pen).item():.4f}\n\n")
+    print(f"CE: {ce_loss.item():.4f}, Pen: {pen.item():.4f}, Scaled Pen: {(lamda*pen).item():.4f}")
     if args.dataset in {'citeseer'} and not args.full:
         cos_loss = consis_loss(out, 0.5, 0.9)
         (loss+cos_loss).backward()
@@ -37,7 +37,7 @@ def train(model, optimizer, adj_hp, adj_lp, x, y, mask, lamda=0.001):
 
 def test(model, adj_hp, adj_lp, x, y, mask):
     model.eval()
-    out, accs, losses = model(adj_hp, adj_lp, x), [], []
+    out, accs, losses = model(adj_hp, adj_lp, x, add_reg=False), [], []
     logits, _ = out
     logits = F.log_softmax(logits, dim=1)
     for i in range(3):
@@ -159,6 +159,8 @@ def run(args, dataset, optimi, full, random_split, i):
     run_time = []
     for epoch in trange(args.epochs, desc=f'Run {i+1}'):
         t0 = time.time()
+        if epoch % 500 == 0:
+            lamda /= 5
         train(model, optimizer, adjs, None, features, labels, mask, lamda)
         run_time.append(time.time()-t0)
         [train_acc, val_acc, tmp_test_acc], [train_loss, val_loss, tmp_test_loss], logits = test(model, adjs, None, features, labels, mask)

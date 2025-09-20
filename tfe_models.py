@@ -154,7 +154,7 @@ class TFE_GNN(nn.Module):
             xx = xx + coe[i] * x0
         return xx
 
-    def forward(self, adj_hp, adj_lp, h0):
+    def forward(self, adj_hp, adj_lp, h0, add_reg=True):
         # Accept either a list of adjs or the traditional (adj_hp, adj_lp)
         if isinstance(adj_hp, (list, tuple)):
             adjs = list(adj_hp)
@@ -201,10 +201,12 @@ class TFE_GNN(nn.Module):
                 h = F.dropout(h, self.drop[1], self.training)
 
         pen = 0.0
-        if self.training and len(h_bands) > 2:
+        if add_reg and self.training and len(h_bands) > 2:
             lp = h_bands[0].detach()   # LP reference (no grad)
             hp = h_bands[-1].detach()  # HP reference (no grad)
-        
+            clp = F.normalize(lp, dim=1)
+            chp = F.normalize(hp, dim=1)
+
             # penalize mid bands against each other
             for i in range(1, len(h_bands)-1):
                 for j in range(i+1, len(h_bands)-1):
@@ -216,12 +218,10 @@ class TFE_GNN(nn.Module):
             for i in range(1, len(h_bands)-1):
                 ci = F.normalize(h_bands[i], dim=1)
         
-                # LP as reference
-                clp = F.normalize(lp, dim=1)
+                # LP as reference    
                 pen += (ci * clp).sum(dim=1).mean()
         
                 # HP as reference
-                chp = F.normalize(hp, dim=1)
                 pen += (ci * chp).sum(dim=1).mean()
 
         return h, pen
